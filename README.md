@@ -154,6 +154,55 @@ cd frontend && npm run typecheck
 - [qwen-chat-plan.md](./docs/qwen-chat-plan.md) — このプロジェクトで採った設計判断、代替案、リスクと対処
 - [CLAUDE.md](CLAUDE.md) — 開発方針（関数型・TDD・日本語・機能単位 commit）
 
+## データの外部送信について
+
+このアプリは**インターネットへ何も送信しません**。これを 3 層で担保しています。
+
+### 1. 構造的に外部に出るコードが無い
+
+通信経路は全部 `localhost`:
+
+```
+frontend (localhost:44100) ──fetch──▶ backend (localhost:8000)
+backend                    ──httpx─▶ Ollama (localhost:11434)
+frontend                   ──IndexedDB──▶ ブラウザ内ローカル
+```
+
+- backend で外部 HTTP を叩く可能性のある箇所は `httpx` の利用箇所のみで、すべて `settings.ollama_url`（既定 `http://localhost:11434`）に向かっている
+- frontend で `fetch` するのは [chat-api.ts](frontend/app/utils/chat-api.ts) の `BACKEND_URL = 'http://localhost:8000'` だけ
+- LLM 自体（Qwen2.5 / Ollama）はネットワーク I/O を持たない純粋な計算プロセス。tool / function calling を渡していないので、Qwen が「外部 API を叩きます」と出力しても**実際には何も実行されず、ただの文字列として表示されるだけ**
+
+### 2. backend の egress は allowlist で実行時に拒否
+
+`httpx.AsyncClient` を [WhitelistTransport](backend/app/egress.py) でラップしており、許可外ホストへの request は `BlockedEgressError` で即拒否されます。コード変更や設定ミスで外部 URL が混入しても、ここで止まります。
+
+許可ホストの既定値は **Ollama URL のホストのみ**（`localhost`）。別ホストを足す必要があれば `.env` で `CHAT_EGRESS_ALLOWLIST=["host1","host2"]` を指定できます。
+
+```python
+# 例: 設定で許可しない限り、外部 fetch は失敗する
+await client.get("http://example.com/")
+# raises BlockedEgressError: Blocked egress to disallowed host: example.com
+```
+
+### 3. （オプション）OS ファイアウォールで完全遮断
+
+完全保証が欲しい場合は Windows Defender Firewall でアプリプロセスのアウトバウンドを遮断できます:
+
+```powershell
+# Python (uvicorn) のアウトバウンドを localhost 以外ブロック
+New-NetFirewallRule -DisplayName "Block local-ai-chat backend egress" `
+  -Direction Outbound -Action Block `
+  -Program "C:\dev\local-ai-chat\backend\.venv\Scripts\python.exe" `
+  -RemoteAddress "Internet"
+```
+
+これで層 1〜2 が裏切られても OS レベルで止まります。本気で機密情報を扱うなら推奨。
+
+### 注意
+
+- `scaffold-home-page.tsx` だけは Google Fonts を CDN から読み込んでいます（`/` ホームページの装飾フォントのみ。`/chat` ページでは使われていません）。気になる場合は [scaffold-home-page.tsx](frontend/app/ui/scaffold-home-page.tsx) のフォント `<link>` を削除してください。
+- Ollama 本体は `ollama pull` 時のみ外部に出ます（モデル取得）。チャット推論中はローカル完結。
+
 ## 制約・注意
 
 - **ローカル単独運用前提**。認証なし、CORS は `localhost` のみ許可。インターネット公開向けにはそのまま使えない。
