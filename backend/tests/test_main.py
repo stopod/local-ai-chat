@@ -112,3 +112,36 @@ def test_chat_は_Ollama_の_5xx_時に_error_行をストリームで返す(cli
     obj = json.loads(res.text.strip())
     assert "error" in obj
     assert "500" in obj["error"]
+
+
+def test_models_は_Ollama_のモデル一覧を返す(client_with_fake_ollama):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return httpx.Response(
+                200,
+                json={
+                    "models": [
+                        {"name": "qwen2.5:latest", "size": 100},
+                        {"name": "gemma3:4b", "size": 200},
+                    ]
+                },
+            )
+        raise AssertionError(f"unexpected path {request.url}")
+
+    client = client_with_fake_ollama(handler)
+    res = client.get("/api/models")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert [m["name"] for m in body["models"]] == ["qwen2.5:latest", "gemma3:4b"]
+
+
+def test_models_は_Ollama_停止時に_空配列を返す(client_with_fake_ollama):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    client = client_with_fake_ollama(handler)
+    res = client.get("/api/models")
+
+    assert res.status_code == 200
+    assert res.json() == {"models": []}

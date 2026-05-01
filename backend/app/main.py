@@ -14,6 +14,7 @@ from .chat import stream_chat_with_ollama
 from .config import CORS_ORIGINS, Settings, get_settings
 from .health import check_ollama
 from .schemas import ChatRequest
+from .trim import trim_messages
 
 app = FastAPI(title="local-ai-chat", version="0.1.0")
 
@@ -40,6 +41,21 @@ async def health(
     return await check_ollama(client, settings.ollama_url, settings.ollama_model)
 
 
+@app.get("/api/models")
+async def models(
+    client: httpx.AsyncClient = Depends(get_http_client),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Ollama にインストール済みのモデル一覧を返す（フロントの切替 UI 用）。"""
+    try:
+        response = await client.get(f"{settings.ollama_url}/api/tags", timeout=5.0)
+        response.raise_for_status()
+        data = response.json()
+        return {"models": data.get("models", [])}
+    except (httpx.RequestError, httpx.HTTPStatusError):
+        return {"models": []}
+
+
 def _error_line(message: str) -> bytes:
     return (json.dumps({"error": message}) + "\n").encode("utf-8")
 
@@ -57,13 +73,15 @@ async def chat(
     - 接続失敗・5xx は HTTP 200 のままストリームの最後に `{"error":"..."}` を 1 行挟む。
     """
 
+    trimmed = trim_messages(body.messages, settings.max_history_chars)
+
     async def generate() -> AsyncIterator[bytes]:
         try:
             async for line in stream_chat_with_ollama(
                 client,
                 ollama_url=settings.ollama_url,
                 model=body.model or settings.ollama_model,
-                messages=body.messages,
+                messages=trimmed,
                 options=body.options,
                 num_ctx=settings.num_ctx,
                 timeout=settings.ollama_timeout_seconds,
