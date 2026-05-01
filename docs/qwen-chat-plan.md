@@ -168,6 +168,13 @@ Ollama に `GET /api/tags` を 5 秒タイムアウトで叩き、`{"ollama_up":
 Ollama の `GET /api/tags` の結果をフロントが扱いやすい形に整形して返す。
 `{"models": [{"name": "qwen2.5:latest", "size": ..., "modified_at": ...}]}`
 
+#### `GET /api/prompts`（Phase 5）
+`backend/prompts/*.md` を読み出してシステムプロンプトのプリセット一覧を返す。
+`{"prompts": [{"id": "kansai-ben", "name": "関西弁アシスタント", "content": "..."}]}`
+
+形式は最小限: 1 行目 `# 表示名`、残り本文。見出し無しならファイル名を name にフォールバック。
+リクエスト毎にディレクトリを読み直すので md 編集が再起動なしで反映される。
+
 ### trim.py（簡易コンテキストトリミング）
 - system メッセージは常に保持。
 - 末尾（最新）から順に文字数を加算し、`max_history_chars` を超えたらそこより古いものを切り捨てる。
@@ -270,8 +277,9 @@ export function renderMarkdown(src: string): string {
 | 3 | 永続化と履歴 | IndexedDB スキーマ、サイドバー、新規チャット／読込／削除 | 1 日 |
 | 4 | 仕上げ | システムプロンプト編集 UI、Markdown + sanitize、`/api/models` でモデル切替 UI、コンテキストトリミング | 1 日 |
 | Remix 3 学習バッファ | ベータ版のドキュメント不足・API 変更への対応 | 必要に応じて | +0.5〜1 日 |
+| 5 | プロンプトプリセット | `backend/prompts/*.md` から読み込み、設定パネルにプルダウン追加（自由入力 textarea は併存） | 半日 |
 
-**合計: 実働 4〜5 日**（whisper-api の知見が活きる backend は早い、Remix 3 が時間ドライバ）。
+**合計: 実働 5 日前後**（whisper-api の知見が活きる backend は早い、Remix 3 が時間ドライバ）。
 
 ---
 
@@ -301,6 +309,7 @@ export function renderMarkdown(src: string): string {
 | `CHAT_NUM_CTX` | `8192` | Ollama に渡す num_ctx |
 | `CHAT_MAX_HISTORY_CHARS` | `24000` | トリミング閾値 |
 | `CHAT_SYSTEM_PROMPT` | `""` | 初期システムプロンプト |
+| `CHAT_PROMPTS_DIR` | `backend/prompts` | プリセット md を置くディレクトリ |
 
 ---
 

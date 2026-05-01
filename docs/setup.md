@@ -138,7 +138,26 @@ curl -N -X POST http://localhost:8000/api/chat `
 ### VRAM が足りない
 - 同 PC の whisper-api を停止する、または Qwen をより小さなモデル（`gemma3:4b` など）に切り替える。
 
-## 11. 関連ドキュメント
+## 11. システムプロンプトのプリセットを追加・編集する
 
-- [計画書](../qwen-chat-plan.md) — プロジェクトの設計判断・MVP スコープ・代替案
+[backend/prompts/](../backend/prompts/) に `*.md` ファイルを置くと、フロントの設定パネルに自動でプルダウン選択肢として現れる。フォーマットは最小限:
+
+```markdown
+# 表示名
+
+ここからシステムプロンプト本文。
+複数行 OK。
+```
+
+- ファイル名（拡張子なし）が内部 ID（例: `kansai-ben.md` → `kansai-ben`）
+- 1 行目の `# 見出し` がプルダウンの表示名。無い場合はファイル名がフォールバック
+- ファイル名の昇順で並ぶ
+- **再起動不要**: バックエンドはリクエスト毎にディレクトリを読み直すので、md を保存したらブラウザの設定パネルを開き直すだけで反映される
+- 別ディレクトリに置きたい場合は `.env` で `CHAT_PROMPTS_DIR=...` を指定
+
+サンプルとして `kansai-ben.md` / `code-reviewer.md` / `english-translator.md` の 3 つが同梱されている。
+
+## 12. 関連ドキュメント
+
+- [計画書](qwen-chat-plan.md) — プロジェクトの設計判断・MVP スコープ・代替案
 - [CLAUDE.md](../CLAUDE.md) — 開発方針（関数型・TDD・日本語・機能単位 commit）
