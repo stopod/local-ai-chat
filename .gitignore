@@ -1,0 +1,32 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+
+# Node / Vite / Remix
+node_modules/
+dist/
+build/
+.cache/
+.vite/
+.remix/
+
+# 環境変数・秘密情報
+.env
+.env.local
+.env.*.local
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
