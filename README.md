@@ -151,7 +151,7 @@ cd frontend && npm run typecheck
 
 ### 設計ドキュメント
 
-- [qwen-chat-plan.md](qwen-chat-plan.md) — このプロジェクトで採った設計判断、代替案、リスクと対処
+- [qwen-chat-plan.md](./docs/qwen-chat-plan.md) — このプロジェクトで採った設計判断、代替案、リスクと対処
 - [CLAUDE.md](CLAUDE.md) — 開発方針（関数型・TDD・日本語・機能単位 commit）
 
 ## 制約・注意
