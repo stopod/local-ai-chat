@@ -12,6 +12,8 @@ export const assets = createAssetServer({
     'app/ui/prompt-button.tsx',
     'app/ui/chat-composer.tsx',
     'app/utils/chat-api.ts',
+    'app/utils/conversation-repository.ts',
+    'app/utils/indexeddb-repository.ts',
     'node_modules/**',
   ],
   deny: ['app/**/*.server.*'],
