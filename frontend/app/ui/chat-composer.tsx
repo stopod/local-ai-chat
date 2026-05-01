@@ -1,4 +1,11 @@
-import { clientEntry, css, on, ref, type Handle, type SerializableProps } from 'remix/ui'
+import {
+  clientEntry,
+  css,
+  on,
+  ref,
+  type Handle,
+  type SerializableProps,
+} from 'remix/ui'
 
 import {
   getModels,
@@ -8,6 +15,7 @@ import {
 } from '../utils/chat-api.ts'
 import type { Conversation, ConversationRepository } from '../utils/conversation-repository.ts'
 import { createIndexedDbRepository } from '../utils/indexeddb-repository.ts'
+import { renderMarkdown } from '../utils/markdown.ts'
 
 interface ChatComposerProps extends SerializableProps {}
 
@@ -398,7 +406,11 @@ export const ChatComposer = clientEntry(
                   >
                     <strong>{msg.role === 'user' ? 'あなた' : 'Qwen'}: </strong>
                     <span mix={contentStyle}>
-                      {msg.content}
+                      {msg.role === 'assistant' ? (
+                        <MarkdownContent source={msg.content} />
+                      ) : (
+                        msg.content
+                      )}
                       {isLoading &&
                       idx === messages.length - 1 &&
                       msg.role === 'assistant' ? (
@@ -700,3 +712,75 @@ const secondaryButtonStyle = css({
   fontSize: '13px',
   '&:hover': { background: '#f0f0f0' },
 })
+
+const markdownStyle = css({
+  '& p': { margin: '0 0 8px 0' },
+  '& p:last-child': { margin: 0 },
+  '& h1, & h2, & h3, & h4': { margin: '12px 0 8px 0', fontWeight: 600 },
+  '& ul, & ol': { paddingLeft: '20px', margin: '0 0 8px 0' },
+  '& li': { marginBottom: '2px' },
+  '& code': {
+    background: 'rgba(0,0,0,0.06)',
+    padding: '2px 4px',
+    borderRadius: '3px',
+    fontSize: '90%',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  },
+  '& pre': {
+    background: '#f6f8fa',
+    padding: '12px',
+    borderRadius: '6px',
+    overflow: 'auto',
+    margin: '8px 0',
+  },
+  '& pre code': {
+    background: 'transparent',
+    padding: 0,
+    fontSize: '13px',
+  },
+  '& a': { color: '#2196f3' },
+  '& blockquote': {
+    borderLeft: '3px solid #ccc',
+    paddingLeft: '12px',
+    color: '#555',
+    margin: '8px 0',
+  },
+  '& table': {
+    borderCollapse: 'collapse',
+    margin: '8px 0',
+  },
+  '& th, & td': {
+    border: '1px solid #ccc',
+    padding: '4px 8px',
+  },
+})
+
+/**
+ * Markdown を innerHTML で描画する内部コンポーネント。
+ * Remix 3 の JSX には dangerouslySetInnerHTML が無いため、ref で要素を捕捉して
+ * queueTask で再 render 後に innerHTML を更新する。ストリーム中の delta 更新でも
+ * 毎回 source が変わって再描画される想定。
+ */
+function MarkdownContent(handle: Handle<{ source: string }>) {
+  let el: HTMLSpanElement | null = null
+
+  return () => {
+    const html = renderMarkdown(handle.props.source)
+    handle.queueTask(() => {
+      if (el && el.innerHTML !== html) {
+        el.innerHTML = html
+      }
+    })
+    return (
+      <span
+        mix={[
+          markdownStyle,
+          ref((node) => {
+            el = node as HTMLSpanElement
+            el.innerHTML = html
+          }),
+        ]}
+      />
+    )
+  }
+}

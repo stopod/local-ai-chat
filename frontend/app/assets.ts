@@ -14,6 +14,7 @@ export const assets = createAssetServer({
     'app/utils/chat-api.ts',
     'app/utils/conversation-repository.ts',
     'app/utils/indexeddb-repository.ts',
+    'app/utils/markdown.ts',
     'node_modules/**',
   ],
   deny: ['app/**/*.server.*'],
