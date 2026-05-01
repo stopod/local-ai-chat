@@ -4,4 +4,5 @@ export const routes = route({
   assets: get('/assets/*path'),
   home: '/',
   auth: '/auth',
+  chat: '/chat',
 })

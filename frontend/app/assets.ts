@@ -7,7 +7,13 @@ export const assets = createAssetServer({
     'app/*path': 'app/*path',
     'node_modules/*path': 'node_modules/*path',
   },
-  allow: ['app/assets/**', 'app/ui/prompt-button.tsx', 'node_modules/**'],
+  allow: [
+    'app/assets/**',
+    'app/ui/prompt-button.tsx',
+    'app/ui/chat-composer.tsx',
+    'app/utils/chat-api.ts',
+    'node_modules/**',
+  ],
   deny: ['app/**/*.server.*'],
   sourceMaps: process.env.NODE_ENV === 'development' ? 'external' : undefined,
   scripts: {
