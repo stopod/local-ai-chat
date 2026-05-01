@@ -9,9 +9,11 @@ import {
 
 import {
   getModels,
+  getPrompts,
   streamChat,
   type ChatMessage,
   type ModelInfo,
+  type PromptPreset,
 } from '../utils/chat-api.ts'
 import type { Conversation, ConversationRepository } from '../utils/conversation-repository.ts'
 import { createIndexedDbRepository } from '../utils/indexeddb-repository.ts'
@@ -28,11 +30,13 @@ export const ChatComposer = clientEntry(
 
     let conversations: Conversation[] = []
     let availableModels: ModelInfo[] = []
+    let availablePrompts: PromptPreset[] = []
     let currentConversationId: string | null = null
     let messages: ChatMessage[] = []
     let isLoading = false
     let errorMessage: string | null = null
     let textareaEl: HTMLTextAreaElement | null = null
+    let settingsTextareaEl: HTMLTextAreaElement | null = null
     let abortController: AbortController | null = null
 
     // 新規会話用の保留設定。会話を切り替えるたびに会話側へ移し替える
@@ -42,17 +46,21 @@ export const ChatComposer = clientEntry(
     // 設定パネル
     let settingsOpen = false
     let settingsDraft = ''
+    /** プルダウンで選択中のプリセット ID。textarea を手で編集すると空になる */
+    let selectedPresetId = ''
 
     // 初回 render の後に一覧をロード
     handle.queueTask(async (signal) => {
       try {
-        const [convs, models] = await Promise.all([
+        const [convs, models, presets] = await Promise.all([
           repository.listConversations(),
           getModels(signal),
+          getPrompts(signal),
         ])
         if (signal.aborted) return
         conversations = convs
         availableModels = models
+        availablePrompts = presets
         if (models.length > 0 && !models.find((m) => m.name === pendingModel)) {
           pendingModel = models[0].name
         }
@@ -135,12 +143,32 @@ export const ChatComposer = clientEntry(
 
     function openSettings() {
       settingsDraft = getCurrentSystemPrompt()
+      // 現在のプロンプトと完全一致するプリセットがあれば、そのプルダウンを選択中にする
+      const match = availablePrompts.find((p) => p.content === settingsDraft)
+      selectedPresetId = match?.id ?? ''
       settingsOpen = true
       void handle.update()
     }
 
     function cancelSettings() {
       settingsOpen = false
+      selectedPresetId = ''
+      void handle.update()
+    }
+
+    function applyPreset(presetId: string) {
+      if (!presetId) {
+        selectedPresetId = ''
+        settingsDraft = ''
+        if (settingsTextareaEl) settingsTextareaEl.value = ''
+        void handle.update()
+        return
+      }
+      const preset = availablePrompts.find((p) => p.id === presetId)
+      if (!preset) return
+      selectedPresetId = presetId
+      settingsDraft = preset.content
+      if (settingsTextareaEl) settingsTextareaEl.value = preset.content
       void handle.update()
     }
 
@@ -362,18 +390,46 @@ export const ChatComposer = clientEntry(
 
             {settingsOpen && (
               <div mix={settingsPanelStyle}>
+                {availablePrompts.length > 0 && (
+                  <label mix={settingsLabelStyle}>
+                    プリセット:
+                    <select
+                      mix={[
+                        presetSelectStyle,
+                        on('change', (event) => {
+                          applyPreset((event.currentTarget as HTMLSelectElement).value)
+                        }),
+                      ]}
+                    >
+                      <option value="" selected={selectedPresetId === ''}>
+                        （選択してください / カスタム）
+                      </option>
+                      {availablePrompts.map((p) => (
+                        <option key={p.id} value={p.id} selected={p.id === selectedPresetId}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label mix={settingsLabelStyle}>システムプロンプト</label>
                 <textarea
                   mix={[
                     settingsTextareaStyle,
                     ref((node) => {
                       const el = node as HTMLTextAreaElement
+                      settingsTextareaEl = el
                       el.value = settingsDraft
                       // 開いた瞬間にフォーカス
                       queueMicrotask(() => el.focus())
                     }),
                     on('input', (event) => {
                       settingsDraft = (event.currentTarget as HTMLTextAreaElement).value
+                      // 手で編集したらプリセット選択は外す（最初の編集のみ再描画）
+                      if (selectedPresetId !== '') {
+                        selectedPresetId = ''
+                        void handle.update()
+                      }
                     }),
                   ]}
                   placeholder="例: あなたは関西弁で答えるアシスタントです。"
@@ -607,6 +663,16 @@ const settingsPanelStyle = css({
 const settingsLabelStyle = css({
   fontSize: '13px',
   fontWeight: 600,
+})
+
+const presetSelectStyle = css({
+  marginLeft: '8px',
+  padding: '4px 8px',
+  border: '1px solid #ccc',
+  borderRadius: '4px',
+  fontSize: '13px',
+  fontFamily: 'inherit',
+  background: 'white',
 })
 
 const settingsTextareaStyle = css({

@@ -100,3 +100,22 @@ export async function getModels(signal?: AbortSignal): Promise<ModelInfo[]> {
     return []
   }
 }
+
+/** バックエンドの `prompts/*.md` から読み出したシステムプロンプトのプリセット 1 件。 */
+export interface PromptPreset {
+  id: string
+  name: string
+  content: string
+}
+
+/** プリセット一覧を返す。失敗時は空配列。 */
+export async function getPrompts(signal?: AbortSignal): Promise<PromptPreset[]> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/prompts`, { signal })
+    if (!response.ok) return []
+    const data = (await response.json()) as { prompts?: PromptPreset[] }
+    return data.prompts ?? []
+  } catch {
+    return []
+  }
+}
