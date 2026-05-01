@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     max_history_chars: int = 24000
     prompts_dir: Path = _BACKEND_ROOT / "prompts"
 
+    # Ollama URL のホストは自動許可される。それ以外に追加したいホストがあれば指定する
+    # 例: CHAT_EGRESS_ALLOWLIST=["my-internal-server.local"]
+    egress_allowlist: list[str] = []
+
 
 @lru_cache
 def get_settings() -> Settings:

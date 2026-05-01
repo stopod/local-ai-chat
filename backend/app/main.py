@@ -4,6 +4,7 @@
 """
 import json
 from collections.abc import AsyncIterator
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import Depends, FastAPI, Request
@@ -12,6 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from .chat import stream_chat_with_ollama
 from .config import CORS_ORIGINS, Settings, get_settings
+from .egress import WhitelistTransport
 from .health import check_ollama
 from .prompts import load_prompts
 from .schemas import ChatRequest
@@ -28,9 +30,28 @@ app.add_middleware(
 )
 
 
+def _allowed_egress_hosts(settings: Settings) -> set[str]:
+    """設定から egress 許可ホスト集合を作る。
+
+    Ollama URL のホストは自動で含める。`egress_allowlist` で追加可能。
+    """
+    hosts = {h.lower() for h in settings.egress_allowlist}
+    parsed = urlparse(settings.ollama_url)
+    if parsed.hostname:
+        hosts.add(parsed.hostname.lower())
+    return hosts
+
+
 async def get_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """リクエストごとに使い捨ての AsyncClient を提供する。テストでは override される。"""
-    async with httpx.AsyncClient() as client:
+    """リクエストごとに使い捨ての AsyncClient を提供する。
+
+    `WhitelistTransport` でラップしているので、設定で許可されたホスト
+    （既定では Ollama の localhost のみ）以外への request は
+    `BlockedEgressError` で拒否される。テストでは dependency override で差し替えられる。
+    """
+    settings = get_settings()
+    transport = WhitelistTransport(_allowed_egress_hosts(settings))
+    async with httpx.AsyncClient(transport=transport) as client:
         yield client
 
 
