@@ -47,3 +47,55 @@ def test_health_は_Ollama_停止時にも_200_でフラグを返す(client_with
 
     assert res.status_code == 200
     assert res.json()["ollama_up"] is False
+
+
+def test_chat_は_assistant_応答を_JSON_で返す(client_with_fake_ollama):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/chat":
+            return httpx.Response(
+                200,
+                json={"message": {"role": "assistant", "content": "こんにちは"}},
+            )
+        raise AssertionError(f"unexpected path {request.url}")
+
+    client = client_with_fake_ollama(handler)
+    res = client.post(
+        "/api/chat", json={"messages": [{"role": "user", "content": "hi"}]}
+    )
+
+    assert res.status_code == 200
+    assert res.json() == {"role": "assistant", "content": "こんにちは"}
+
+
+def test_chat_は_messages_空だと_422_を返す(client_with_fake_ollama):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("Ollama に届いてはならない")
+
+    client = client_with_fake_ollama(handler)
+    res = client.post("/api/chat", json={"messages": []})
+
+    assert res.status_code == 422
+
+
+def test_chat_は_Ollama_接続失敗で_503(client_with_fake_ollama):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    client = client_with_fake_ollama(handler)
+    res = client.post(
+        "/api/chat", json={"messages": [{"role": "user", "content": "hi"}]}
+    )
+
+    assert res.status_code == 503
+
+
+def test_chat_は_Ollama_の_5xx_を_502_に変換する(client_with_fake_ollama):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    client = client_with_fake_ollama(handler)
+    res = client.post(
+        "/api/chat", json={"messages": [{"role": "user", "content": "hi"}]}
+    )
+
+    assert res.status_code == 502
