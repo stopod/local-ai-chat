@@ -162,4 +162,22 @@ cd frontend && npm run typecheck
 
 ## ライセンス
 
-[MIT License](LICENSE)。商用利用・改変・再配布・販売すべて自由。著作権表示とライセンス文だけ残せば、それ以外に制約なし。本ソフトウェアに対する一切の保証はありません（`AS IS`）。
+このリポジトリで自分が書いたコードは [MIT License](LICENSE) で公開しています。商用利用・改変・再配布・販売すべて自由、著作権表示とライセンス文だけ残せば OK。本ソフトウェアに対する一切の保証はありません（`AS IS`）。
+
+依存ライブラリや scaffold 由来のファイルなど、サードパーティの著作権・ライセンスについては [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) に整理しています。
+
+## Acknowledgments
+
+このプロジェクトは以下の OSS / 公開モデルなしには成立しません。各プロジェクトの開発者・コミュニティに感謝します。
+
+- **[Remix 3](https://remix.run/)** by Shopify — Preact フォーク内蔵の Web フレームワーク。フロント全体の土台
+- **[FastAPI](https://fastapi.tiangolo.com/)** — バックエンドの土台
+- **[httpx](https://www.python-httpx.org/)** — Ollama への async ストリーム接続
+- **[Ollama](https://ollama.com/)** — ローカル LLM 実行ランタイム
+- **[Qwen2.5](https://github.com/QwenLM/Qwen2.5)** by Alibaba Cloud — 推論モデル
+- **[idb](https://github.com/jakearchibald/idb)** by Jake Archibald — IndexedDB ラッパ
+- **[marked](https://marked.js.org/)** / **[DOMPurify](https://github.com/cure53/DOMPurify)** — Markdown 描画と XSS 対策
+
+## Qwen の利用にあたって
+
+このリポジトリは Qwen のモデル本体を含まず、Ollama 経由でユーザーが取得する前提です。**Qwen のライセンスはモデルサイズや時期によって変わる場合があるため**、商用利用や再配布を検討する場合は [Qwen 公式リポジトリ](https://github.com/QwenLM/Qwen2.5) で最新のライセンスを確認してください。本リポジトリ自体の MIT ライセンスは、Qwen の利用条件をユーザーに対して上書き・保証するものではありません。
