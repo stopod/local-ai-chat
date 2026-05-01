@@ -84,18 +84,18 @@ local-ai-chat/
 │  └─ app/
 │     ├─ routes.ts              # ルート定義（型安全）
 │     ├─ router.ts              # ルート→ハンドラの紐付け
+│     ├─ assets.ts              # アセット配信の allow リスト
 │     ├─ controllers/
-│     │   └─ chat.tsx           # チャット画面（flat なまま）
+│     │   └─ chat.tsx           # GET /chat ハンドラ（ChatPage を render）
 │     ├─ ui/
-│     │   ├─ chat-window.tsx
-│     │   ├─ message-bubble.tsx
-│     │   ├─ composer-input.tsx
-│     │   └─ document.tsx       # scaffold 既存
+│     │   ├─ chat-page.tsx      # サーバーサイド: Layout でラップ
+│     │   ├─ chat-composer.tsx  # clientEntry: サイドバー＋メッセージ＋入力
+│     │   └─ document.tsx, layout.tsx (scaffold 既存)
 │     └─ utils/
-│         ├─ stream.ts          # NDJSON ストリームのパース
-│         ├─ api.ts             # /api/* のラッパ
-│         ├─ storage.ts         # IndexedDB (idb) ラッパ
-│         └─ markdown.ts        # marked + DOMPurify
+│         ├─ chat-api.ts                # /api/chat の fetch ラッパ（streamChat）
+│         ├─ conversation-repository.ts # 永続化の型のみ（実装非依存）
+│         ├─ indexeddb-repository.ts    # ConversationRepository の IndexedDB 実装
+│         └─ markdown.ts                # marked + DOMPurify（Phase 4）
 ├─ qwen-chat-plan.md           # 本ファイル
 └─ README.md
 ```
@@ -219,11 +219,21 @@ export async function* parseNdjson(response: Response, signal: AbortSignal) {
 - 文字化け対策: `TextDecoder({ stream: true })` で UTF-8 マルチバイトの境界を自動処理。
 - 停止: `AbortController.signal` を渡し、ボタン押下で `abort()`、フロント側ループで `reader.cancel()`。バックエンドは `is_disconnected()` で検知してから Ollama 接続を閉じる（両側で対応）。
 
-### IndexedDB スキーマ（lib/storage.ts）
+### 永続化（Repository パターン）
+
+ストレージ実装を後から差し替えられるよう、型と実装を分離する。
+
+- `utils/conversation-repository.ts`: `ConversationRepository` インターフェースと `Conversation` / `Message` 型のみ
+- `utils/indexeddb-repository.ts`: `idb` を使った具体実装（ファクトリ関数 `createIndexedDbRepository()`）
+
+**IndexedDB スキーマ**:
 - DB 名: `local-ai-chat`、version 1
-- objectStore: `conversations`（key: `id`、`{id, title, createdAt, updatedAt, systemPrompt, model}`）
-- objectStore: `messages`（key: `id`、index `byConversation` で `conversationId` 検索、`{id, conversationId, role, content, createdAt}`）
-- マイグレーション: `idb` の `upgrade(db, oldVersion, newVersion)` でバージョン分岐。MVP は version 1 のみ。
+- objectStore `conversations`: key `id`、`{id, title, createdAt, updatedAt, systemPrompt, model}`、index `byUpdatedAt`
+- objectStore `messages`: key `id`、`{id, conversationId, role, content, createdAt}`、index `byConversation`
+- 削除はトランザクションで会話と関連メッセージを一括削除
+- マイグレーション: `idb` の `upgrade(db, oldVersion)` で version 分岐。MVP は version 1 のみ。
+
+**将来の差し替え**: SQLite (WASM もしくはサーバー側 FastAPI 経由) に切り替える場合は `ConversationRepository` を満たす別実装を作って差し替えるだけ。UI 側は触らない。
 
 ### Markdown 描画（lib/markdown.ts）
 
@@ -342,12 +352,14 @@ npm run dev   # http://localhost:44100
 - [backend/app/trim.py](backend/app/trim.py) — コンテキストトリミング
 
 **Frontend**:
-- [frontend/app/routes.ts](frontend/app/routes.ts)
-- [frontend/app/router.ts](frontend/app/router.ts)
+- [frontend/app/routes.ts](frontend/app/routes.ts) / [frontend/app/router.ts](frontend/app/router.ts)
 - [frontend/app/controllers/chat.tsx](frontend/app/controllers/chat.tsx)
-- [frontend/app/utils/stream.ts](frontend/app/utils/stream.ts) — NDJSON パーサ（核）
-- [frontend/app/utils/storage.ts](frontend/app/utils/storage.ts) — IndexedDB
-- [frontend/app/utils/markdown.ts](frontend/app/utils/markdown.ts) — marked + DOMPurify
+- [frontend/app/ui/chat-page.tsx](frontend/app/ui/chat-page.tsx) — サーバーサイド Layout
+- [frontend/app/ui/chat-composer.tsx](frontend/app/ui/chat-composer.tsx) — clientEntry（サイドバー＋チャット）
+- [frontend/app/utils/chat-api.ts](frontend/app/utils/chat-api.ts) — NDJSON streamChat（核）
+- [frontend/app/utils/conversation-repository.ts](frontend/app/utils/conversation-repository.ts) — Repository 型
+- [frontend/app/utils/indexeddb-repository.ts](frontend/app/utils/indexeddb-repository.ts) — IndexedDB 実装
+- [frontend/app/utils/markdown.ts](frontend/app/utils/markdown.ts) — marked + DOMPurify（Phase 4 で追加）
 
 ---
 
