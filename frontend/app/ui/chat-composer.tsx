@@ -1,6 +1,6 @@
 import { clientEntry, css, on, ref, type Handle, type SerializableProps } from 'remix/ui'
 
-import { sendChat, type ChatMessage } from '../utils/chat-api.ts'
+import { streamChat, type ChatMessage } from '../utils/chat-api.ts'
 
 interface ChatComposerProps extends SerializableProps {}
 
@@ -11,25 +11,58 @@ export const ChatComposer = clientEntry(
     let isLoading = false
     let errorMessage: string | null = null
     let textareaEl: HTMLTextAreaElement | null = null
+    let abortController: AbortController | null = null
 
     async function submit() {
       const text = (textareaEl?.value ?? '').trim()
       if (!text || isLoading) return
-      messages = [...messages, { role: 'user', content: text }]
+      const history: ChatMessage[] = [...messages, { role: 'user', content: text }]
+      messages = [...history, { role: 'assistant', content: '' }]
       if (textareaEl) textareaEl.value = ''
       isLoading = true
       errorMessage = null
+      abortController = new AbortController()
       await handle.update()
+
       try {
-        const reply = await sendChat(messages)
-        messages = [...messages, reply]
+        for await (const event of streamChat(history, abortController.signal)) {
+          if (event.error) {
+            errorMessage = event.error
+            // 空の assistant プレースホルダを取り除く
+            messages = history
+            break
+          }
+          if (event.delta) {
+            const last = messages[messages.length - 1]
+            messages[messages.length - 1] = {
+              ...last,
+              content: last.content + event.delta,
+            }
+            await handle.update()
+          }
+          if (event.done) break
+        }
       } catch (err) {
-        errorMessage = err instanceof Error ? err.message : String(err)
+        if ((err as { name?: string }).name === 'AbortError') {
+          // ユーザーが停止ボタンを押した。空のままなら除去、内容があればそのまま残す
+          const last = messages[messages.length - 1]
+          if (last.role === 'assistant' && last.content === '') {
+            messages = history
+          }
+        } else {
+          errorMessage = err instanceof Error ? err.message : String(err)
+          messages = history
+        }
       } finally {
         isLoading = false
+        abortController = null
         await handle.update()
         textareaEl?.focus()
       }
+    }
+
+    function cancel() {
+      abortController?.abort()
     }
 
     return () => (
@@ -44,11 +77,15 @@ export const ChatComposer = clientEntry(
                 mix={msg.role === 'user' ? userBubbleStyle : assistantBubbleStyle}
               >
                 <strong>{msg.role === 'user' ? 'あなた' : 'Qwen'}: </strong>
-                <span mix={contentStyle}>{msg.content}</span>
+                <span mix={contentStyle}>
+                  {msg.content}
+                  {isLoading && idx === messages.length - 1 && msg.role === 'assistant' ? (
+                    <span mix={cursorStyle}>▍</span>
+                  ) : null}
+                </span>
               </div>
             ))
           )}
-          {isLoading && <p mix={hintStyle}>送信中…</p>}
           {errorMessage && <p mix={errorStyle}>{errorMessage}</p>}
         </div>
         <div mix={composerStyle}>
@@ -70,10 +107,15 @@ export const ChatComposer = clientEntry(
           />
           <button
             type="button"
-            disabled={isLoading}
-            mix={[buttonStyle, on('click', () => void submit())]}
+            mix={[
+              buttonStyle,
+              on('click', () => {
+                if (isLoading) cancel()
+                else void submit()
+              }),
+            ]}
           >
-            {isLoading ? '送信中…' : '送信'}
+            {isLoading ? '停止' : '送信'}
           </button>
         </div>
       </div>
@@ -117,6 +159,16 @@ const assistantBubbleStyle = css({
 
 const contentStyle = css({
   whiteSpace: 'pre-wrap',
+})
+
+const cursorStyle = css({
+  display: 'inline-block',
+  marginLeft: '2px',
+  color: '#666',
+  animation: 'rmx-cursor-blink 1s steps(2) infinite',
+  '@keyframes rmx-cursor-blink': {
+    '50%': { opacity: 0 },
+  },
 })
 
 const hintStyle = css({
