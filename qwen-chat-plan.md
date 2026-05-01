@@ -34,7 +34,7 @@
 ## 2. アーキテクチャ
 
 ```
-[Remix 3 (Preact, :5173)]
+[Remix 3 (Preact, :44100)]
     │ fetch /api/chat   (POST, NDJSON streaming response)
     │ fetch /api/models (GET)
     │ fetch /api/health (GET)
@@ -77,25 +77,25 @@ local-ai-chat/
 │     ├─ trim.py               # コンテキスト長の自動トリミング
 │     ├─ schemas.py            # Pydantic モデル
 │     └─ config.py             # pydantic-settings
-├─ frontend/
+├─ frontend/                    # `npx remix@next new frontend` で scaffold
 │  ├─ package.json
 │  ├─ tsconfig.json
+│  ├─ server.ts                 # エントリ（remix/node-serve）
 │  └─ app/
-│     ├─ root.tsx
-│     ├─ routes.ts             # Remix 3 の型安全ルート定義
+│     ├─ routes.ts              # ルート定義（型安全）
+│     ├─ router.ts              # ルート→ハンドラの紐付け
 │     ├─ controllers/
-│     │   └─ chat/
-│     │       └─ page.tsx
-│     ├─ components/
-│     │   ├─ ChatWindow.tsx
-│     │   ├─ MessageBubble.tsx
-│     │   └─ ComposerInput.tsx
-│     ├─ lib/
-│     │   ├─ stream.ts         # NDJSON ストリームのパース
-│     │   ├─ api.ts            # /api/* のラッパ
-│     │   ├─ storage.ts        # IndexedDB (idb) ラッパ
-│     │   └─ markdown.ts       # marked + DOMPurify
-│     └─ types.ts
+│     │   └─ chat.tsx           # チャット画面（flat なまま）
+│     ├─ ui/
+│     │   ├─ chat-window.tsx
+│     │   ├─ message-bubble.tsx
+│     │   ├─ composer-input.tsx
+│     │   └─ document.tsx       # scaffold 既存
+│     └─ utils/
+│         ├─ stream.ts          # NDJSON ストリームのパース
+│         ├─ api.ts             # /api/* のラッパ
+│         ├─ storage.ts         # IndexedDB (idb) ラッパ
+│         └─ markdown.ts        # marked + DOMPurify
 ├─ qwen-chat-plan.md           # 本ファイル
 └─ README.md
 ```
@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     num_ctx: int = 8192                      # Ollama 既定 2048 では会話が浅い、Qwen2.5 は 32K まで
     max_history_chars: int = 24000           # トリミング閾値（簡易、文字数ベース）
 
-CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+CORS_ORIGINS = ["http://localhost:44100", "http://127.0.0.1:44100"]
 ```
 
 ### エンドポイント
@@ -179,7 +179,7 @@ Ollama の `GET /api/tags` の結果をフロントが扱いやすい形に整�
 
 ### 重要な前提
 - **Remix 3 は 2026 早期に v1 GA 予定のベータ版**。React 排除、Preact フォーク採用、Fetch API ベース、ビルド最小化。
-- scaffold: `npx remix@next new` で生成し、`frontend/` ディレクトリに配置。
+- scaffold: `npx remix@next new frontend --app-name "local-ai-chat"` で生成。Node ≥ 24.3.0 必須（Volta などで導入）。
 - Preact エコシステムを使う必要があるため、当初想定の **react-markdown は使えない**。代替として `marked` + `DOMPurify`（vanilla JS、フレームワーク非依存）を採用。
 
 ### 主要ライブラリ
@@ -192,6 +192,7 @@ Ollama の `GET /api/tags` の結果をフロントが扱いやすい形に整�
 | サニタイズ | `dompurify` | XSS 対策必須 |
 | コードハイライト | `highlight.js` | marked.use() で組み込み |
 | スタイル | vanilla CSS（または CSS Modules） | Tailwind は導入しない（学習コスト・ベータ版の動作不確実） |
+| ランタイム | Node ≥ 24.3.0 | Remix 3 ベータの requires-engine。Volta で導入 |
 
 ### ストリーム受信（lib/stream.ts）
 
@@ -307,7 +308,7 @@ uv run uvicorn app.main:app --reload --port 8000
 # Frontend（別ターミナル）
 cd c:\dev\local-ai-chat\frontend
 npm install
-npm run dev   # http://localhost:5173
+npm run dev   # http://localhost:44100
 ```
 
 ---
@@ -340,12 +341,13 @@ npm run dev   # http://localhost:5173
 - [backend/app/config.py](backend/app/config.py) — pydantic-settings
 - [backend/app/trim.py](backend/app/trim.py) — コンテキストトリミング
 
-**Frontend**（scaffold 後）:
+**Frontend**:
 - [frontend/app/routes.ts](frontend/app/routes.ts)
-- [frontend/app/controllers/chat/page.tsx](frontend/app/controllers/chat/page.tsx)
-- [frontend/app/lib/stream.ts](frontend/app/lib/stream.ts) — NDJSON パーサ（核）
-- [frontend/app/lib/storage.ts](frontend/app/lib/storage.ts) — IndexedDB
-- [frontend/app/lib/markdown.ts](frontend/app/lib/markdown.ts) — marked + DOMPurify
+- [frontend/app/router.ts](frontend/app/router.ts)
+- [frontend/app/controllers/chat.tsx](frontend/app/controllers/chat.tsx)
+- [frontend/app/utils/stream.ts](frontend/app/utils/stream.ts) — NDJSON パーサ（核）
+- [frontend/app/utils/storage.ts](frontend/app/utils/storage.ts) — IndexedDB
+- [frontend/app/utils/markdown.ts](frontend/app/utils/markdown.ts) — marked + DOMPurify
 
 ---
 
