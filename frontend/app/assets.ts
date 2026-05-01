@@ -9,7 +9,6 @@ export const assets = createAssetServer({
   },
   allow: [
     'app/assets/**',
-    'app/ui/prompt-button.tsx',
     'app/ui/chat-composer.tsx',
     'app/utils/chat-api.ts',
     'app/utils/conversation-repository.ts',

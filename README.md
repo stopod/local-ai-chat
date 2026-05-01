@@ -200,7 +200,6 @@ New-NetFirewallRule -DisplayName "Block local-ai-chat backend egress" `
 
 ### 注意
 
-- `scaffold-home-page.tsx` だけは Google Fonts を CDN から読み込んでいます（`/` ホームページの装飾フォントのみ。`/chat` ページでは使われていません）。気になる場合は [scaffold-home-page.tsx](frontend/app/ui/scaffold-home-page.tsx) のフォント `<link>` を削除してください。
 - Ollama 本体は `ollama pull` 時のみ外部に出ます（モデル取得）。チャット推論中はローカル完結。
 
 ## 制約・注意

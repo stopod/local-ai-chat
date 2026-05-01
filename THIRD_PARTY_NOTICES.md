@@ -36,18 +36,16 @@ local-ai-chat は以下の OSS と公開モデルの上に成り立っていま�
 frontend/AGENTS.md
 frontend/.agents/skills/remix/SKILL.md
 frontend/.agents/skills/remix/references/*.md
-frontend/app/controllers/home.tsx
-frontend/app/controllers/auth.tsx
 frontend/app/ui/document.tsx
-frontend/app/ui/layout.tsx
-frontend/app/ui/prompt-button.tsx
-frontend/app/ui/scaffold-home-page.tsx
+frontend/app/ui/layout.tsx          (ナビを削除する小さな改変あり)
 frontend/app/utils/render.tsx
 frontend/app/assets/entry.ts
-frontend/app/assets.ts（雛形）
+frontend/app/assets.ts（雛形、allow リストを編集）
 frontend/server.ts
 frontend/tsconfig.json（雛形）
 ```
+
+scaffold が生成した `controllers/auth.tsx` / `ui/scaffold-home-page.tsx` / `ui/prompt-button.tsx` は本アプリでは使わないため削除しています。`controllers/home.tsx` は `/chat` へのリダイレクトに書き換えており、実質オリジナル扱いです（下記「自分で書いたコード」に含む）。
 
 ## LLM ランタイムとモデル（リポジトリには含まれない）
 
@@ -63,13 +61,15 @@ frontend/tsconfig.json（雛形）
 以下は本リポジトリのために新規作成された著作物で、[LICENSE](LICENSE)（MIT）に従います。
 
 ```
-backend/app/main.py / chat.py / health.py / trim.py / config.py / schemas.py
+backend/app/main.py / chat.py / health.py / trim.py / config.py / schemas.py / egress.py / prompts.py
+backend/prompts/*.md
 backend/tests/*.py
 frontend/app/controllers/chat.tsx
+frontend/app/controllers/home.tsx (`/` から `/chat` へのリダイレクト)
 frontend/app/ui/chat-page.tsx / chat-composer.tsx
 frontend/app/utils/chat-api.ts
 frontend/app/utils/conversation-repository.ts
 frontend/app/utils/indexeddb-repository.ts
 frontend/app/utils/markdown.ts
-README.md / qwen-chat-plan.md / docs/setup.md / CLAUDE.md / .gitignore
+README.md / docs/qwen-chat-plan.md / docs/setup.md / CLAUDE.md / .gitignore
 ```
