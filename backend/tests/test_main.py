@@ -1,4 +1,5 @@
 """FastAPI アプリのエンドポイントを TestClient で検証する。"""
+import json
 from collections.abc import AsyncIterator
 
 import httpx
@@ -49,13 +50,16 @@ def test_health_は_Ollama_停止時にも_200_でフラグを返す(client_with
     assert res.json()["ollama_up"] is False
 
 
-def test_chat_は_assistant_応答を_JSON_で返す(client_with_fake_ollama):
+def test_chat_は_NDJSON_ストリームを返す(client_with_fake_ollama):
+    chunks = (
+        b'{"message":{"role":"assistant","content":"\xe3\x81\x93"},"done":false}\n'
+        b'{"message":{"role":"assistant","content":"\xe3\x82\x93"},"done":false}\n'
+        b'{"done":true,"total_duration":1234}\n'
+    )
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/chat":
-            return httpx.Response(
-                200,
-                json={"message": {"role": "assistant", "content": "こんにちは"}},
-            )
+            return httpx.Response(200, content=chunks)
         raise AssertionError(f"unexpected path {request.url}")
 
     client = client_with_fake_ollama(handler)
@@ -64,7 +68,10 @@ def test_chat_は_assistant_応答を_JSON_で返す(client_with_fake_ollama):
     )
 
     assert res.status_code == 200
-    assert res.json() == {"role": "assistant", "content": "こんにちは"}
+    assert res.headers["content-type"].startswith("application/x-ndjson")
+    lines = [json.loads(line) for line in res.text.strip().split("\n")]
+    assert "".join(line.get("message", {}).get("content", "") for line in lines) == "こん"
+    assert lines[-1]["done"] is True
 
 
 def test_chat_は_messages_空だと_422_を返す(client_with_fake_ollama):
@@ -77,7 +84,7 @@ def test_chat_は_messages_空だと_422_を返す(client_with_fake_ollama):
     assert res.status_code == 422
 
 
-def test_chat_は_Ollama_接続失敗で_503(client_with_fake_ollama):
+def test_chat_は_Ollama_接続失敗時に_error_行をストリームで返す(client_with_fake_ollama):
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("down")
 
@@ -86,10 +93,13 @@ def test_chat_は_Ollama_接続失敗で_503(client_with_fake_ollama):
         "/api/chat", json={"messages": [{"role": "user", "content": "hi"}]}
     )
 
-    assert res.status_code == 503
+    assert res.status_code == 200
+    obj = json.loads(res.text.strip())
+    assert "error" in obj
+    assert "Cannot reach Ollama" in obj["error"]
 
 
-def test_chat_は_Ollama_の_5xx_を_502_に変換する(client_with_fake_ollama):
+def test_chat_は_Ollama_の_5xx_時に_error_行をストリームで返す(client_with_fake_ollama):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="boom")
 
@@ -98,4 +108,7 @@ def test_chat_は_Ollama_の_5xx_を_502_に変換する(client_with_fake_ollama
         "/api/chat", json={"messages": [{"role": "user", "content": "hi"}]}
     )
 
-    assert res.status_code == 502
+    assert res.status_code == 200
+    obj = json.loads(res.text.strip())
+    assert "error" in obj
+    assert "500" in obj["error"]
