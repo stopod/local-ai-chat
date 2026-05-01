@@ -16,6 +16,16 @@ export interface ChatStreamEvent {
 
 const BACKEND_URL = 'http://localhost:8000'
 
+export interface StreamChatOptions {
+  model?: string
+}
+
+export interface ModelInfo {
+  name: string
+  size?: number
+  modified_at?: string
+}
+
 /**
  * バックエンドの POST /api/chat を呼び、NDJSON を 1 行ずつ ChatStreamEvent として yield する。
  *
@@ -25,11 +35,14 @@ const BACKEND_URL = 'http://localhost:8000'
 export async function* streamChat(
   messages: ChatMessage[],
   signal?: AbortSignal,
+  options?: StreamChatOptions,
 ): AsyncGenerator<ChatStreamEvent> {
+  const body: { messages: ChatMessage[]; model?: string } = { messages }
+  if (options?.model) body.model = options.model
   const response = await fetch(`${BACKEND_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify(body),
     signal,
   })
   if (!response.ok) {
@@ -73,5 +86,17 @@ function parseLine(line: string): ChatStreamEvent {
     delta: obj.message?.content ?? '',
     done: obj.done ?? false,
     error: obj.error,
+  }
+}
+
+/** Ollama にインストール済みのモデル一覧を返す。失敗時は空配列。 */
+export async function getModels(signal?: AbortSignal): Promise<ModelInfo[]> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/models`, { signal })
+    if (!response.ok) return []
+    const data = (await response.json()) as { models?: ModelInfo[] }
+    return data.models ?? []
+  } catch {
+    return []
   }
 }

@@ -1,6 +1,11 @@
 import { clientEntry, css, on, ref, type Handle, type SerializableProps } from 'remix/ui'
 
-import { streamChat, type ChatMessage } from '../utils/chat-api.ts'
+import {
+  getModels,
+  streamChat,
+  type ChatMessage,
+  type ModelInfo,
+} from '../utils/chat-api.ts'
 import type { Conversation, ConversationRepository } from '../utils/conversation-repository.ts'
 import { createIndexedDbRepository } from '../utils/indexeddb-repository.ts'
 
@@ -14,6 +19,7 @@ export const ChatComposer = clientEntry(
     const repository: ConversationRepository = createIndexedDbRepository()
 
     let conversations: Conversation[] = []
+    let availableModels: ModelInfo[] = []
     let currentConversationId: string | null = null
     let messages: ChatMessage[] = []
     let isLoading = false
@@ -21,24 +27,53 @@ export const ChatComposer = clientEntry(
     let textareaEl: HTMLTextAreaElement | null = null
     let abortController: AbortController | null = null
 
-    // 初回 render の後に会話一覧をロードする（setup 中は handle.update() を呼べない）
+    // 新規会話用の保留設定。会話を切り替えるたびに会話側へ移し替える
+    let pendingSystemPrompt = ''
+    let pendingModel = DEFAULT_MODEL
+
+    // 設定パネル
+    let settingsOpen = false
+    let settingsDraft = ''
+
+    // 初回 render の後に一覧をロード
     handle.queueTask(async (signal) => {
       try {
-        const list = await repository.listConversations()
+        const [convs, models] = await Promise.all([
+          repository.listConversations(),
+          getModels(signal),
+        ])
         if (signal.aborted) return
-        conversations = list
+        conversations = convs
+        availableModels = models
+        if (models.length > 0 && !models.find((m) => m.name === pendingModel)) {
+          pendingModel = models[0].name
+        }
       } catch (err) {
         if (signal.aborted) return
-        errorMessage = `履歴の読み込みに失敗: ${err instanceof Error ? err.message : String(err)}`
+        errorMessage = `初期化に失敗: ${err instanceof Error ? err.message : String(err)}`
       }
       await handle.update()
     })
+
+    function getCurrentConversation(): Conversation | null {
+      if (!currentConversationId) return null
+      return conversations.find((c) => c.id === currentConversationId) ?? null
+    }
+
+    function getCurrentSystemPrompt(): string {
+      return getCurrentConversation()?.systemPrompt ?? pendingSystemPrompt
+    }
+
+    function getCurrentModel(): string {
+      return getCurrentConversation()?.model ?? pendingModel
+    }
 
     function startNewConversation() {
       if (isLoading) return
       currentConversationId = null
       messages = []
       errorMessage = null
+      settingsOpen = false
       void handle.update()
       textareaEl?.focus()
     }
@@ -47,6 +82,7 @@ export const ChatComposer = clientEntry(
       if (isLoading) return
       currentConversationId = id
       errorMessage = null
+      settingsOpen = false
       try {
         const stored = await repository.listMessages(id)
         messages = stored.map((m) => ({ role: m.role, content: m.content }))
@@ -72,13 +108,60 @@ export const ChatComposer = clientEntry(
       await handle.update()
     }
 
+    async function changeModel(newModel: string) {
+      const conv = getCurrentConversation()
+      if (conv) {
+        try {
+          await repository.updateConversation(conv.id, { model: newModel })
+          conversations = conversations.map((c) =>
+            c.id === conv.id ? { ...c, model: newModel } : c,
+          )
+        } catch (err) {
+          errorMessage = `モデルの保存に失敗: ${err instanceof Error ? err.message : String(err)}`
+        }
+      } else {
+        pendingModel = newModel
+      }
+      await handle.update()
+    }
+
+    function openSettings() {
+      settingsDraft = getCurrentSystemPrompt()
+      settingsOpen = true
+      void handle.update()
+    }
+
+    function cancelSettings() {
+      settingsOpen = false
+      void handle.update()
+    }
+
+    async function saveSettings() {
+      const value = settingsDraft
+      const conv = getCurrentConversation()
+      if (conv) {
+        try {
+          await repository.updateConversation(conv.id, { systemPrompt: value })
+          conversations = conversations.map((c) =>
+            c.id === conv.id ? { ...c, systemPrompt: value } : c,
+          )
+        } catch (err) {
+          errorMessage = `保存に失敗: ${err instanceof Error ? err.message : String(err)}`
+        }
+      } else {
+        pendingSystemPrompt = value
+      }
+      settingsOpen = false
+      await handle.update()
+    }
+
     async function ensureConversation(firstUserText: string): Promise<string> {
       if (currentConversationId) return currentConversationId
       const title = firstUserText.slice(0, 30) || '新しいチャット'
       const created = await repository.createConversation({
         title,
-        systemPrompt: '',
-        model: DEFAULT_MODEL,
+        systemPrompt: pendingSystemPrompt,
+        model: pendingModel,
       })
       conversations = [created, ...conversations]
       currentConversationId = created.id
@@ -90,6 +173,7 @@ export const ChatComposer = clientEntry(
       if (!text || isLoading) return
 
       const conversationId = await ensureConversation(text)
+      const conversation = conversations.find((c) => c.id === conversationId)
 
       const history: ChatMessage[] = [...messages, { role: 'user', content: text }]
       messages = [...history, { role: 'assistant', content: '' }]
@@ -99,16 +183,25 @@ export const ChatComposer = clientEntry(
       abortController = new AbortController()
       await handle.update()
 
-      // user メッセージは即時保存
       try {
         await repository.appendMessage({ conversationId, role: 'user', content: text })
       } catch (err) {
         errorMessage = `保存に失敗: ${err instanceof Error ? err.message : String(err)}`
       }
 
+      // Ollama に渡すメッセージ列を組み立て（system はここで先頭に挿入）
+      const ollamaMessages: ChatMessage[] = []
+      const systemPrompt = conversation?.systemPrompt ?? ''
+      if (systemPrompt) {
+        ollamaMessages.push({ role: 'system', content: systemPrompt })
+      }
+      ollamaMessages.push(...history)
+
       let aborted = false
       try {
-        for await (const event of streamChat(history, abortController.signal)) {
+        for await (const event of streamChat(ollamaMessages, abortController.signal, {
+          model: conversation?.model ?? pendingModel,
+        })) {
           if (event.error) {
             errorMessage = event.error
             messages = history
@@ -140,7 +233,6 @@ export const ChatComposer = clientEntry(
         abortController = null
       }
 
-      // assistant 応答を保存（中身があれば、停止/エラーでも途中まで残す）
       const finalAssistant = messages[messages.length - 1]
       if (finalAssistant?.role === 'assistant' && finalAssistant.content) {
         try {
@@ -154,11 +246,10 @@ export const ChatComposer = clientEntry(
         }
       }
 
-      // 会話一覧の updatedAt を反映するため再読込
       try {
         conversations = await repository.listConversations()
       } catch {
-        // 失敗しても致命的ではないので無視
+        // 致命的ではないので無視
       }
 
       await handle.update()
@@ -169,111 +260,190 @@ export const ChatComposer = clientEntry(
       abortController?.abort()
     }
 
-    return () => (
-      <div mix={shellStyle}>
-        <aside mix={sidebarStyle}>
-          <button
-            type="button"
-            disabled={isLoading}
-            mix={[newButtonStyle, on('click', () => startNewConversation())]}
-          >
-            ＋ 新しいチャット
-          </button>
-          <ul mix={listStyle}>
-            {conversations.length === 0 ? (
-              <li mix={emptyHintStyle}>履歴はまだありません</li>
-            ) : (
-              conversations.map((c) => {
-                const active = c.id === currentConversationId
-                return (
-                  <li key={c.id} mix={active ? activeItemStyle : itemStyle}>
-                    <button
-                      type="button"
-                      mix={[
-                        itemTitleStyle,
-                        on('click', () => void selectConversation(c.id)),
-                      ]}
-                      title={c.title}
-                    >
-                      {c.title || '(無題)'}
-                    </button>
-                    <button
-                      type="button"
-                      title="削除"
-                      mix={[
-                        deleteButtonStyle,
-                        on('click', (event) => {
-                          event.stopPropagation()
-                          if (confirm(`「${c.title}」を削除しますか？`)) {
-                            void deleteConversation(c.id)
-                          }
-                        }),
-                      ]}
-                    >
-                      ✕
-                    </button>
-                  </li>
-                )
-              })
-            )}
-          </ul>
-        </aside>
+    return () => {
+      const currentModel = getCurrentModel()
+      const currentSystemPrompt = getCurrentSystemPrompt()
+      // available models に現在値が無い場合（オフライン等）も選択肢として残す
+      const modelOptions = availableModels.find((m) => m.name === currentModel)
+        ? availableModels
+        : [{ name: currentModel } as ModelInfo, ...availableModels]
 
-        <section mix={mainStyle}>
-          <div mix={messagesStyle}>
-            {messages.length === 0 ? (
-              <p mix={hintStyle}>メッセージを入力してください。</p>
-            ) : (
-              messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  mix={msg.role === 'user' ? userBubbleStyle : assistantBubbleStyle}
-                >
-                  <strong>{msg.role === 'user' ? 'あなた' : 'Qwen'}: </strong>
-                  <span mix={contentStyle}>
-                    {msg.content}
-                    {isLoading && idx === messages.length - 1 && msg.role === 'assistant' ? (
-                      <span mix={cursorStyle}>▍</span>
-                    ) : null}
-                  </span>
-                </div>
-              ))
-            )}
-            {errorMessage && <p mix={errorStyle}>{errorMessage}</p>}
-          </div>
-          <div mix={composerStyle}>
-            <textarea
-              placeholder="メッセージを入力 (Ctrl+Enter で送信)"
-              disabled={isLoading}
-              mix={[
-                textareaStyle,
-                ref((node) => {
-                  textareaEl = node as HTMLTextAreaElement
-                }),
-                on('keydown', (event) => {
-                  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                    event.preventDefault()
-                    void submit()
-                  }
-                }),
-              ]}
-            />
+      return (
+        <div mix={shellStyle}>
+          <aside mix={sidebarStyle}>
             <button
               type="button"
-              mix={[
-                buttonStyle,
-                on('click', () => {
-                  if (isLoading) cancel()
-                  else void submit()
-                }),
-              ]}
+              disabled={isLoading}
+              mix={[newButtonStyle, on('click', () => startNewConversation())]}
             >
-              {isLoading ? '停止' : '送信'}
+              ＋ 新しいチャット
             </button>
-          </div>
-        </section>
-      </div>
-    )
+            <ul mix={listStyle}>
+              {conversations.length === 0 ? (
+                <li mix={emptyHintStyle}>履歴はまだありません</li>
+              ) : (
+                conversations.map((c) => {
+                  const active = c.id === currentConversationId
+                  return (
+                    <li key={c.id} mix={active ? activeItemStyle : itemStyle}>
+                      <button
+                        type="button"
+                        mix={[
+                          itemTitleStyle,
+                          on('click', () => void selectConversation(c.id)),
+                        ]}
+                        title={c.title}
+                      >
+                        {c.title || '(無題)'}
+                      </button>
+                      <button
+                        type="button"
+                        title="削除"
+                        mix={[
+                          deleteButtonStyle,
+                          on('click', (event) => {
+                            event.stopPropagation()
+                            if (confirm(`「${c.title}」を削除しますか？`)) {
+                              void deleteConversation(c.id)
+                            }
+                          }),
+                        ]}
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  )
+                })
+              )}
+            </ul>
+          </aside>
+
+          <section mix={mainStyle}>
+            <header mix={headerStyle}>
+              <label mix={modelLabelStyle}>
+                モデル:
+                <select
+                  disabled={isLoading}
+                  mix={[
+                    modelSelectStyle,
+                    on('change', (event) => {
+                      const value = (event.currentTarget as HTMLSelectElement).value
+                      void changeModel(value)
+                    }),
+                  ]}
+                >
+                  {modelOptions.map((m) => (
+                    <option key={m.name} value={m.name} selected={m.name === currentModel}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={isLoading}
+                title="システムプロンプトを編集"
+                mix={[
+                  iconButtonStyle,
+                  on('click', () => (settingsOpen ? cancelSettings() : openSettings())),
+                ]}
+              >
+                ⚙ {currentSystemPrompt ? '設定（あり）' : '設定'}
+              </button>
+            </header>
+
+            {settingsOpen && (
+              <div mix={settingsPanelStyle}>
+                <label mix={settingsLabelStyle}>システムプロンプト</label>
+                <textarea
+                  mix={[
+                    settingsTextareaStyle,
+                    ref((node) => {
+                      const el = node as HTMLTextAreaElement
+                      el.value = settingsDraft
+                      // 開いた瞬間にフォーカス
+                      queueMicrotask(() => el.focus())
+                    }),
+                    on('input', (event) => {
+                      settingsDraft = (event.currentTarget as HTMLTextAreaElement).value
+                    }),
+                  ]}
+                  placeholder="例: あなたは関西弁で答えるアシスタントです。"
+                />
+                <div mix={settingsButtonsStyle}>
+                  <button
+                    type="button"
+                    mix={[secondaryButtonStyle, on('click', () => cancelSettings())]}
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="button"
+                    mix={[primaryButtonStyle, on('click', () => void saveSettings())]}
+                  >
+                    保存
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div mix={messagesStyle}>
+              {messages.length === 0 ? (
+                <p mix={hintStyle}>メッセージを入力してください。</p>
+              ) : (
+                messages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    mix={msg.role === 'user' ? userBubbleStyle : assistantBubbleStyle}
+                  >
+                    <strong>{msg.role === 'user' ? 'あなた' : 'Qwen'}: </strong>
+                    <span mix={contentStyle}>
+                      {msg.content}
+                      {isLoading &&
+                      idx === messages.length - 1 &&
+                      msg.role === 'assistant' ? (
+                        <span mix={cursorStyle}>▍</span>
+                      ) : null}
+                    </span>
+                  </div>
+                ))
+              )}
+              {errorMessage && <p mix={errorStyle}>{errorMessage}</p>}
+            </div>
+            <div mix={composerStyle}>
+              <textarea
+                placeholder="メッセージを入力 (Ctrl+Enter で送信)"
+                disabled={isLoading}
+                mix={[
+                  textareaStyle,
+                  ref((node) => {
+                    textareaEl = node as HTMLTextAreaElement
+                  }),
+                  on('keydown', (event) => {
+                    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                      event.preventDefault()
+                      void submit()
+                    }
+                  }),
+                ]}
+              />
+              <button
+                type="button"
+                mix={[
+                  primaryButtonStyle,
+                  on('click', () => {
+                    if (isLoading) cancel()
+                    else void submit()
+                  }),
+                ]}
+              >
+                {isLoading ? '停止' : '送信'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )
+    }
   },
 )
 
@@ -373,6 +543,76 @@ const mainStyle = css({
   minWidth: 0,
 })
 
+const headerStyle = css({
+  display: 'flex',
+  alignItems: 'center',
+  gap: '12px',
+  padding: '8px 12px',
+  background: '#f5f5f5',
+  border: '1px solid #ddd',
+  borderRadius: '6px',
+  fontSize: '13px',
+})
+
+const modelLabelStyle = css({
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+  flex: 1,
+})
+
+const modelSelectStyle = css({
+  padding: '4px 8px',
+  border: '1px solid #ccc',
+  borderRadius: '4px',
+  fontSize: '13px',
+  fontFamily: 'inherit',
+  background: 'white',
+})
+
+const iconButtonStyle = css({
+  padding: '4px 12px',
+  background: 'white',
+  border: '1px solid #ccc',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  fontSize: '13px',
+  fontFamily: 'inherit',
+  '&:hover': { background: '#f0f0f0' },
+  '&:disabled': { background: '#eee', cursor: 'not-allowed' },
+})
+
+const settingsPanelStyle = css({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '8px',
+  padding: '12px',
+  background: '#fffbe6',
+  border: '1px solid #f0d870',
+  borderRadius: '6px',
+})
+
+const settingsLabelStyle = css({
+  fontSize: '13px',
+  fontWeight: 600,
+})
+
+const settingsTextareaStyle = css({
+  minHeight: '80px',
+  padding: '8px',
+  fontFamily: 'inherit',
+  fontSize: '13px',
+  border: '1px solid #ccc',
+  borderRadius: '4px',
+  resize: 'vertical',
+})
+
+const settingsButtonsStyle = css({
+  display: 'flex',
+  gap: '8px',
+  justifyContent: 'flex-end',
+})
+
 const messagesStyle = css({
   flex: 1,
   overflowY: 'auto',
@@ -436,7 +676,7 @@ const textareaStyle = css({
   resize: 'vertical',
 })
 
-const buttonStyle = css({
+const primaryButtonStyle = css({
   padding: '0 24px',
   background: '#2196f3',
   color: 'white',
@@ -448,4 +688,15 @@ const buttonStyle = css({
     background: '#aaa',
     cursor: 'not-allowed',
   },
+})
+
+const secondaryButtonStyle = css({
+  padding: '0 16px',
+  background: 'white',
+  color: '#333',
+  border: '1px solid #ccc',
+  borderRadius: '6px',
+  cursor: 'pointer',
+  fontSize: '13px',
+  '&:hover': { background: '#f0f0f0' },
 })
