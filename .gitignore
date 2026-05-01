@@ -30,3 +30,7 @@ Thumbs.db
 *.swp
 *.swo
 .idea/
+
+# Claude Code の個人設定（skills は共有したいので除外しない）
+.claude/settings*.json
+.claude/.local/
