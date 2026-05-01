@@ -4,8 +4,11 @@
 テストでは `Settings(_env_file=None, ...)` を使うと `.env` の影響を排除できる。
 """
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -17,6 +20,7 @@ class Settings(BaseSettings):
     system_prompt: str = ""
     num_ctx: int = 8192
     max_history_chars: int = 24000
+    prompts_dir: Path = _BACKEND_ROOT / "prompts"
 
 
 @lru_cache

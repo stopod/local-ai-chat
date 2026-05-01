@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from .chat import stream_chat_with_ollama
 from .config import CORS_ORIGINS, Settings, get_settings
 from .health import check_ollama
+from .prompts import load_prompts
 from .schemas import ChatRequest
 from .trim import trim_messages
 
@@ -54,6 +55,17 @@ async def models(
         return {"models": data.get("models", [])}
     except (httpx.RequestError, httpx.HTTPStatusError):
         return {"models": []}
+
+
+@app.get("/api/prompts")
+async def prompts(
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """`prompts_dir` 内の md ファイルから読み出したプリセット一覧を返す。
+
+    リクエスト毎にディレクトリを読み直すので、md を編集すれば再起動なしで反映される。
+    """
+    return {"prompts": [p.model_dump() for p in load_prompts(settings.prompts_dir)]}
 
 
 def _error_line(message: str) -> bytes:

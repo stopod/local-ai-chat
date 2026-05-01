@@ -1,11 +1,13 @@
 """FastAPI アプリのエンドポイントを TestClient で検証する。"""
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import Settings, get_settings
 from app.main import app, get_http_client
 
 
@@ -145,3 +147,50 @@ def test_models_は_Ollama_停止時に_空配列を返す(client_with_fake_olla
 
     assert res.status_code == 200
     assert res.json() == {"models": []}
+
+
+@pytest.fixture
+def client_with_prompts_dir():
+    """`prompts_dir` を上書きした TestClient を返すファクトリ。"""
+
+    def _build(directory: Path):
+        def fake_settings() -> Settings:
+            return Settings(_env_file=None, prompts_dir=directory)  # type: ignore[call-arg]
+
+        app.dependency_overrides[get_settings] = fake_settings
+        return TestClient(app)
+
+    yield _build
+    app.dependency_overrides.clear()
+
+
+def test_prompts_は_md_ファイルから一覧を返す(client_with_prompts_dir, tmp_path: Path):
+    (tmp_path / "kansai-ben.md").write_text(
+        "# 関西弁アシスタント\n\nあなたは関西弁で答えます。\n", encoding="utf-8"
+    )
+    (tmp_path / "code-reviewer.md").write_text(
+        "# コードレビュアー\n\nあなたはレビュアーです。\n", encoding="utf-8"
+    )
+
+    client = client_with_prompts_dir(tmp_path)
+    res = client.get("/api/prompts")
+
+    assert res.status_code == 200
+    body = res.json()
+    ids = [p["id"] for p in body["prompts"]]
+    assert ids == ["code-reviewer", "kansai-ben"]
+    kansai = next(p for p in body["prompts"] if p["id"] == "kansai-ben")
+    assert kansai["name"] == "関西弁アシスタント"
+    assert "関西弁" in kansai["content"]
+
+
+def test_prompts_は_ディレクトリ未存在で_空配列を返す(
+    client_with_prompts_dir, tmp_path: Path
+):
+    missing = tmp_path / "no-such"
+
+    client = client_with_prompts_dir(missing)
+    res = client.get("/api/prompts")
+
+    assert res.status_code == 200
+    assert res.json() == {"prompts": []}

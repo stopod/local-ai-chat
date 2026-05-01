@@ -15,3 +15,11 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
     model: str | None = None
     options: dict | None = None
+
+
+class PromptPreset(BaseModel):
+    """`backend/prompts/*.md` から読み出したシステムプロンプトのプリセット 1 件。"""
+
+    id: str
+    name: str
+    content: str
