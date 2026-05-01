@@ -188,9 +188,9 @@ Ollama の `GET /api/tags` の結果をフロントが扱いやすい形に整�
 |---|---|---|
 | フレームワーク | Remix 3 (`remix@next`) | Preact フォーク内蔵 |
 | IndexedDB | `idb` | whisper-api でも採用 |
-| Markdown | `marked` | vanilla JS、Preact 非依存 |
-| サニタイズ | `dompurify` | XSS 対策必須 |
-| コードハイライト | `highlight.js` | marked.use() で組み込み |
+| Markdown | `marked` | vanilla JS、ESM、Preact 非依存 |
+| サニタイズ | `dompurify` | XSS 対策必須、ESM |
+| コードハイライト | （MVP では不採用） | `highlight.js` を試したが CJS 専用で Remix 3 のアセットサーバー（ESM only）で `COMMONJS_NOT_SUPPORTED` エラー。後で必要なら `shiki` などの ESM 互換ライブラリに乗り換え |
 | スタイル | vanilla CSS（または CSS Modules） | Tailwind は導入しない（学習コスト・ベータ版の動作不確実） |
 | ランタイム | Node ≥ 24.3.0 | Remix 3 ベータの requires-engine。Volta で導入 |
 
@@ -235,28 +235,28 @@ export async function* parseNdjson(response: Response, signal: AbortSignal) {
 
 **将来の差し替え**: SQLite (WASM もしくはサーバー側 FastAPI 経由) に切り替える場合は `ConversationRepository` を満たす別実装を作って差し替えるだけ。UI 側は触らない。
 
-### Markdown 描画（lib/markdown.ts）
+### Markdown 描画（utils/markdown.ts）
 
 ```ts
-import { marked } from "marked";
-import DOMPurify from "dompurify";
-import hljs from "highlight.js";
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 marked.use({
   renderer: {
-    code(code, lang) {
-      const valid = lang && hljs.getLanguage(lang) ? lang : "plaintext";
-      return `<pre><code class="hljs language-${valid}">${hljs.highlight(code, { language: valid }).value}</code></pre>`;
+    code(token) {
+      const lang = (token.lang ?? '').trim()
+      const className = lang ? `language-${lang}` : ''
+      return `<pre><code class="${className}">${escapeHtml(token.text)}</code></pre>`
     },
   },
-});
+})
 
 export function renderMarkdown(src: string): string {
-  return DOMPurify.sanitize(marked.parse(src) as string);
+  return DOMPurify.sanitize(marked.parse(src, { async: false }) as string)
 }
 ```
 
-返り値を `dangerouslySetInnerHTML` 相当（Remix 3 / Preact の同等機能）で挿入。ストリーム中も毎トークン再描画。
+**innerHTML 挿入の流儀**: Remix 3 の JSX には `dangerouslySetInnerHTML` が無い。内部コンポーネント `MarkdownContent` を作り、`ref` で要素を捕捉して `handle.queueTask` で再 render 後に `el.innerHTML = ...` を実行する（chat-composer.tsx の `MarkdownContent` を参照）。ストリーム中も delta が更新されるたびに毎 render で書き換わる。
 
 ---
 
